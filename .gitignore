@@ -6,3 +6,4 @@ android/build/
 android/app/build/
 *.apk
 __pycache__/
+privado/

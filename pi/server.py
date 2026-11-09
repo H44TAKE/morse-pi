@@ -127,7 +127,7 @@ def system_prompt() -> str:
     try:
         extra = PERFIL_FILE.read_text(encoding="utf-8").strip()
         if extra:
-            p += "\n\nO que você sabe sobre o ambiente e as pessoas:\n" + extra[:1500]
+            p += "\n\nO que você sabe sobre o ambiente e as pessoas:\n" + extra[:4500]
     except Exception:  # noqa: BLE001
         pass
     return p

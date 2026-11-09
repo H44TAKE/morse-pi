@@ -13,8 +13,8 @@ android {
         applicationId = "br.pi.morse"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "3.1"
+        versionCode = 7
+        versionName = "3.2"
         buildConfigField("String", "REPO", "\"H44TAKE/morse-pi\"")
     }
 
