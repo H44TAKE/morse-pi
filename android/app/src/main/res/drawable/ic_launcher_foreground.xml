@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- ponto -->
+    <path
+        android:fillColor="#FFB020"
+        android:pathData="M23,54 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+    <!-- traço -->
+    <path
+        android:fillColor="#FFB020"
+        android:pathData="M49,47 h10 a7,7 0 0 1 0,14 h-10 a7,7 0 0 1 0,-14 z" />
+    <!-- ponto -->
+    <path
+        android:fillColor="#FFB020"
+        android:pathData="M71,54 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+</vector>
