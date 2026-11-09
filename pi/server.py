@@ -319,6 +319,8 @@ def on_write(characteristic: BlessGATTCharacteristic, value, **kwargs):
         muted_until = time.time() + 0.8
     elif msg.startswith("P") and len(msg) > 1:
         threading.Thread(target=answer_question, args=(msg[1:],), daemon=True).start()
+    elif msg.startswith("M") and len(msg) > 1:      # transmite em Morse e, no fim, a IA responde
+        loop.call_soon_threadsafe(tx_queue.put_nowait, (msg[1:], True))
     elif msg == "K1":
         key_down()
     elif msg == "K0":
@@ -383,13 +385,16 @@ def play_on_pi(tl) -> None:
 
 async def transmit_worker() -> None:
     while True:
-        text = await tx_queue.get()
+        item = await tx_queue.get()
+        text, then_ask = item if isinstance(item, tuple) else (item, False)
         if morse.is_morse(text):
             code, plain = text.strip(), morse.morse_to_text(text)
         else:
             code, plain = morse.text_to_morse(text), text
         tl = morse.timeline(code, UNIT_MS)
         if not tl:
+            if then_ask:
+                threading.Thread(target=answer_question, args=(text,), daemon=True).start()
             continue
         print(f"{plain}  ->  {code}")
         transmitting.set()
@@ -397,6 +402,8 @@ async def transmit_worker() -> None:
         await loop.run_in_executor(None, play_on_pi, tl)
         await asyncio.sleep(0.6)                       # deixa o eco da caixa morrer
         transmitting.clear()
+        if then_ask:                                   # depois do Morse, a IA responde
+            threading.Thread(target=answer_question, args=(plain,), daemon=True).start()
 
 
 # ---------------- microfone -> texto ----------------

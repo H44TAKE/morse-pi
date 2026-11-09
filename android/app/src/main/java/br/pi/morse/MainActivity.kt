@@ -98,6 +98,7 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
     private lateinit var btnModeMorse: Button
     private lateinit var btnModeAsk: Button
     private lateinit var swAnswerMorse: SwitchCompat
+    private lateinit var swMorseFirst: SwitchCompat
     private lateinit var swSpeakAnswer: SwitchCompat
 
     private lateinit var link: PiLink
@@ -243,7 +244,9 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
         }
         val composeCard = card("Mensagem", input)
         composeCard.addView(row, lp(top = 10))
-        composeCard.addView(btn("🤖  Perguntar à IA (o rosto responde)", false) { askAi() }, lp(top = 8))
+        swMorseFirst = sw("Falar em Morse e depois responder", true)
+        composeCard.addView(swMorseFirst, lp(top = 8))
+        composeCard.addView(btn("🤖  Perguntar à IA (o rosto responde)", false) { askAi() }, lp(top = 2))
 
         heard = tv("", 13f, cMuted)
         textView = tv("—", 26f, cText, bold = true)
@@ -465,7 +468,7 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
     private fun askAi() {
         val s = input.text.toString().trim().replace("\n", " ")
         if (s.isNotEmpty() && requireConnection()) {
-            link.send("P$s")
+            link.send(if (swMorseFirst.isChecked) "M$s" else "P$s")   // M = Morse primeiro, depois a IA responde
             heard.text = "Pergunta: $s"; textView.text = "pensando…"; morseView.text = ""
         }
     }

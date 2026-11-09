@@ -66,10 +66,12 @@ class FaceActivity : AppCompatActivity(), PiLink.Callbacks {
                 tts?.setPitch(1.15f)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(id: String?) { face.speaking = true; link.send("F1") }
-                    override fun onDone(id: String?) { face.speaking = false; link.send("F0"); relax() }
+                    override fun onDone(id: String?) { id?.let { spoken.remove(it) }; ended() }
                     @Deprecated("Deprecated in Java")
-                    override fun onError(id: String?) { face.speaking = false; link.send("F0"); relax() }
-                    override fun onRangeStart(id: String?, start: Int, end: Int, frame: Int) { face.pulse() }
+                    override fun onError(id: String?) { id?.let { spoken.remove(it) }; ended() }
+                    override fun onRangeStart(id: String?, start: Int, end: Int, frame: Int) {
+                        face.pulse(); followSpeech(id, start)
+                    }
                 })
                 ttsOk = true
             }
@@ -116,17 +118,19 @@ class FaceActivity : AppCompatActivity(), PiLink.Callbacks {
     private fun buildUi() {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0B0F14")) }
         face = FaceView(this).apply { setOnClickListener { togglePanel() } }
-        root.addView(face, FrameLayout.LayoutParams(-1, -1))
-
-        caption = tv("", 22f, Color.WHITE).apply {
-            gravity = Gravity.CENTER; maxLines = 4
-            setPadding(dp(18), dp(10), dp(18), dp(10))
-            background = rounded(0x99000000.toInt(), 16)
-            visibility = View.GONE
+        // rosto em cima; legenda numa faixa própria embaixo (nunca cobre a boca)
+        caption = tv("", 17f, Color.WHITE).apply {
+            gravity = Gravity.CENTER; maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(16), dp(6), dp(16), dp(6))
+            visibility = View.INVISIBLE
         }
-        root.addView(caption, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-            bottomMargin = dp(20); leftMargin = dp(40); rightMargin = dp(40)
-        })
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(face, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(caption, LinearLayout.LayoutParams(-1, dp(64)).apply { leftMargin = dp(24); rightMargin = dp(24) })
+        }
+        root.addView(column, FrameLayout.LayoutParams(-1, -1))
 
         status = tv("Desconectado", 14f, cMuted)
         btnConnect = btn("Conectar na Pi", true) { onConnectClick() }
@@ -158,8 +162,35 @@ class FaceActivity : AppCompatActivity(), PiLink.Callbacks {
         panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
     }
 
-    private fun showCaption(t: String) {
-        caption.text = t; caption.visibility = if (t.isEmpty()) View.GONE else View.VISIBLE
+    private var clearCaption: Runnable? = null
+
+    /** Mostra a legenda (sempre na thread da interface) e apaga depois de uns segundos sem fala. */
+    private fun showCaption(t: String, autoClear: Boolean = true) {
+        ui.post {
+            clearCaption?.let { ui.removeCallbacks(it) }
+            caption.text = t
+            caption.visibility = if (t.isEmpty()) View.INVISIBLE else View.VISIBLE
+            if (autoClear && t.isNotEmpty()) {
+                clearCaption = Runnable { if (!face.speaking) caption.visibility = View.INVISIBLE }
+                ui.postDelayed(clearCaption!!, 6000)
+            }
+        }
+    }
+
+    /** Quebra o texto em trechos curtos (até ~70 letras) para a legenda acompanhar a fala. */
+    private fun chunks(text: String): List<IntRange> {
+        val out = ArrayList<IntRange>()
+        var start = 0
+        var i = 0
+        while (i < text.length) {
+            var end = text.indexOf(' ', i)
+            if (end < 0) end = text.length
+            val closes = i >= 2 && i > start && text[i - 2] in ".!?"
+            if (i > start && (end - start > 70 || closes)) { out.add(start until i - 1); start = i }
+            i = end + 1
+        }
+        if (start < text.length) out.add(start until text.length)
+        return out
     }
 
     // ---------------- Bluetooth ----------------
@@ -198,7 +229,7 @@ class FaceActivity : AppCompatActivity(), PiLink.Callbacks {
                 val txt = if (i >= 0) body.substring(i + 1) else body
                 face.mood = FaceView.Mood.IDLE
                 face.emotion = FaceView.Emotion.from(emo)
-                speak(txt)
+                speak(txt, queue = true)
             }
             'S' -> {
                 val p = body.split("\t")
@@ -208,14 +239,34 @@ class FaceActivity : AppCompatActivity(), PiLink.Callbacks {
     }
 
     /** Depois de falar, a expressão volta ao normal depois de uns instantes. */
+    private fun ended() {
+        if (spoken.isNotEmpty()) return            // ainda há fala na fila
+        face.speaking = false; link.send("F0"); relax()
+        showCaption(caption.text.toString())       // deixa a última legenda uns segundos e apaga
+    }
+
     private fun relax() {
         ui.postDelayed({ if (!face.speaking) face.emotion = FaceView.Emotion.NEUTRO }, 3500)
     }
 
     // ---------------- fala e Morse ----------------
-    private fun speak(text: String) {
-        showCaption(text)
-        if (ttsOk) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "fala")
+    private val spoken = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private var utter = 0
+
+    /** Fala o texto; a legenda acompanha trecho a trecho. queue=true espera a fala atual terminar. */
+    private fun speak(text: String, queue: Boolean = false) {
+        if (text.isBlank()) return
+        val id = "fala${utter++}"
+        spoken[id] = text
+        val first = chunks(text).firstOrNull()
+        showCaption(if (first != null) text.substring(first) else text, autoClear = !ttsOk)
+        if (ttsOk) tts?.speak(text, if (queue) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH, null, id)
+    }
+
+    private fun followSpeech(id: String?, start: Int) {
+        val text = spoken[id ?: return] ?: return
+        val c = chunks(text).firstOrNull { start in it } ?: return
+        showCaption(text.substring(c), autoClear = false)
     }
 
     /** Os olhos acendem no ritmo do Morse; no fim, a carinha fala a tradução. */
@@ -228,7 +279,7 @@ class FaceActivity : AppCompatActivity(), PiLink.Callbacks {
                 SystemClock.sleep(s.ms.toLong())
             }
             face.glow = false
-            if (swMorse.isChecked && plain.isNotBlank()) ui.post { speak(plain) }
+            if (swMorse.isChecked && plain.isNotBlank()) ui.post { speak(plain, queue = true) }
         }
     }
 }
