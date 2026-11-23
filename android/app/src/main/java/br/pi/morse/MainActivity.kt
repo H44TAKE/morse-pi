@@ -74,6 +74,8 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
     private lateinit var textView: TextView
     private lateinit var morseView: TextView
     private lateinit var btnMic: Button
+    private lateinit var btnRec: Button
+    private var recOn = false
     private lateinit var swTorch: SwitchCompat
     private lateinit var swScreen: SwitchCompat
     private lateinit var swSound: SwitchCompat
@@ -254,6 +256,7 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
         val resultCard = card("Tradução", heard, textView.also { it.setPadding(0, dp(4), 0, dp(4)) }, morseView)
 
         btnMic = btn("🎤  Microfone da Pi: desligado", false) { toggleMic() }
+        btnRec = btn("🎙  Gravar (toque, fale, toque de novo)", true) { toggleRec() }
         btnModeMorse = btn("Traduzir em Morse", true) { setMode(false) }
         btnModeAsk = btn("Responder perguntas", false) { setMode(true) }
         val modeRow = LinearLayout(this).apply {
@@ -264,7 +267,7 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
         swAnswerMorse = sw("Responder também em Morse", false).apply {
             setOnCheckedChangeListener { _, on -> if (link.isReady) link.send(if (on) "Y1" else "Y0") }
         }
-        val micCard = card("Ouvir pela Pi", tv("O que o microfone da Pi ouve vira:", 13f, cMuted), modeRow, btnMic, swAnswerMorse)
+        val micCard = card("Ouvir pela Pi", btnRec, tv("Toque pra a Pi começar a ouvir; toque de novo pra ela parar e responder.", 13f, cMuted), tv("Ouvido contínuo: o que o microfone da Pi ouve vira:", 13f, cMuted), modeRow, btnMic, swAnswerMorse)
         (modeRow.layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(8)
 
         swTorch = sw("Lanterna", true); swScreen = sw("Tela piscando (se não houver lanterna)", true)
@@ -396,7 +399,10 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
     override fun onState(connected: Boolean, text: String) {
         setStatus(text, connected)
         btnConnect.text = if (link.isBusy) "Desconectar" else "Conectar"
-        if (!connected && !link.isBusy) { micOn = false; btnMic.text = "🎤  Microfone da Pi: desligado" }
+        if (!connected && !link.isBusy) {
+            micOn = false; btnMic.text = "🎤  Microfone da Pi: desligado"
+            recOn = false; styleBtn(btnRec, true); btnRec.text = "🎙  Gravar (toque, fale, toque de novo)"
+        }
     }
 
     override fun onReady() {
@@ -471,6 +477,21 @@ class MainActivity : AppCompatActivity(), PiLink.Callbacks {
             link.send(if (swMorseFirst.isChecked) "M$s" else "P$s")   // M = Morse primeiro, depois a IA responde
             heard.text = "Pergunta: $s"; textView.text = "pensando…"; morseView.text = ""
         }
+    }
+
+    private fun toggleRec() {
+        if (!requireConnection()) return
+        recOn = !recOn
+        if (recOn) {                                   // o ouvido contínuo sai do caminho
+            micOn = false; btnMic.text = "🎤  Microfone da Pi: desligado"
+            link.send("R1")
+            heard.text = "Ouvindo pela Pi…"; textView.text = "…"; morseView.text = ""
+        } else {
+            link.send("R0")
+            heard.text = "Processando…"; textView.text = "pensando…"
+        }
+        styleBtn(btnRec, !recOn)
+        btnRec.text = if (recOn) "⏹  Ouvindo… toque pra parar e responder" else "🎙  Gravar (toque, fale, toque de novo)"
     }
 
     private fun toggleMic() {

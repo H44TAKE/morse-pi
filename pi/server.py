@@ -338,6 +338,10 @@ def on_write(characteristic: BlessGATTCharacteristic, value, **kwargs):
         start_listening()
     elif msg == "L0":
         listening.clear()
+    elif msg == "R1":                      # botão "gravar": começa a ouvir
+        threading.Thread(target=record_start, daemon=True).start()
+    elif msg == "R0":                      # botão "parar": para de ouvir e responde
+        threading.Thread(target=record_stop, daemon=True).start()
 
 
 def on_read(characteristic: BlessGATTCharacteristic, **kwargs):
@@ -490,6 +494,65 @@ def start_listening() -> None:
     if not listening.is_set():
         listening.set()
         threading.Thread(target=listen_loop, daemon=True).start()
+
+
+# ---------------- gravar / parar e responder (botão do app: R1 / R0) ----------------
+_rec = {"proc": None, "chunks": [], "thread": None}
+_rec_lock = threading.Lock()
+
+
+def _rec_reader(p) -> None:
+    t0 = time.time()
+    while _rec["proc"] is p and time.time() - t0 < 90:      # no máximo 90 s
+        raw = p.stdout.read(1280 * 2)
+        if not raw:
+            break
+        a = np.frombuffer(raw, dtype=np.int16).astype(np.float32) * MIC_GAIN
+        _rec["chunks"].append(np.clip(a, -32768, 32767).astype(np.int16))
+
+
+def record_start() -> None:
+    with _rec_lock:
+        if _rec["proc"] is not None:
+            return
+        if listening.is_set():                  # o ouvido contínuo solta o microfone
+            listening.clear()
+            time.sleep(0.5)
+        _rec["chunks"] = []
+        p = subprocess.Popen(["arecord", "-q", "-D", MIC, "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
+                             stdout=subprocess.PIPE)
+        _rec["proc"] = p
+        _rec["thread"] = threading.Thread(target=_rec_reader, args=(p,), daemon=True)
+        _rec["thread"].start()
+        print("gravando...")
+
+
+def record_stop() -> None:
+    with _rec_lock:
+        p = _rec["proc"]
+        if p is None:
+            return
+        _rec["proc"] = None
+        p.kill()
+        _rec["thread"].join(timeout=2)
+        chunks = list(_rec["chunks"])
+    if not chunks:
+        send("HNão ouvi nada (microfone ligado?)")
+        return
+    pcm = np.concatenate(chunks)
+    print(f"gravado {len(pcm) / RATE:.1f}s")
+    try:
+        text = transcribe(pcm)
+    except Exception as e:  # noqa: BLE001
+        print("[erro transcrição]", e)
+        send("HNão consegui transcrever")
+        return
+    if not text:
+        send("HNão entendi nada")
+        return
+    print("ouvi:", text)
+    send("H" + text)
+    answer_question(text)                        # responde (e fala/pisca no rosto)
 
 
 # ---------------- terminal ----------------
